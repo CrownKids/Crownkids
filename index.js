@@ -1,57 +1,58 @@
-const express = require('express');
-const twilio = require('twilio');
+require("dotenv").config();
+const express = require("express");
+const bodyParser = require("body-parser");
+const twilio = require("twilio");
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const port = process.env.PORT || 10000; // Render usa el puerto 10000 por defecto
 
-app.use(express.json());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 
-// 📌 Base de datos de libros (ejemplo)
-const books = [
-    { id: 1, title: "Libro de Matemáticas 1", language: "Español", editorial: "Santillana" },
-    { id: 2, title: "English for Kids", language: "Inglés", editorial: "Oxford" },
-    { id: 3, title: "Ciencias Naturales 3", language: "Español", editorial: "Kapelusz" },
-];
-
-// 📌 Ruta para verificar que el bot está activo
-app.get('/', (req, res) => {
+// Ruta principal para verificar que el servidor está activo
+app.get("/", (req, res) => {
     res.send("El bot está activo");
 });
 
-// 📌 Webhook de WhatsApp
-app.post('/webhook', (req, res) => {
-    const { Body, From } = req.body;
-    const message = Body.toLowerCase().trim();
-    
-    let responseText = "¡Hola! ¿Qué necesitas?\n";
-    responseText += "1️⃣ Ver libros en español\n";
-    responseText += "2️⃣ Ver libros en inglés\n";
-    responseText += "3️⃣ Contactar con un humano";
+// Ruta del webhook para recibir mensajes de WhatsApp
+app.post("/webhook", (req, res) => {
+    try {
+        const twiml = new twilio.twiml.MessagingResponse();
 
-    // 📌 Responder según la opción elegida
-    if (message === "1") {
-        let booksList = books.filter(book => book.language === "Español")
-                             .map(book => `📚 ${book.title} - Editorial: ${book.editorial}`)
-                             .join("\n");
-        responseText = booksList || "No hay libros disponibles en español.";
-    } else if (message === "2") {
-        let booksList = books.filter(book => book.language === "Inglés")
-                             .map(book => `📚 ${book.title} - Editorial: ${book.editorial}`)
-                             .join("\n");
-        responseText = booksList || "No hay libros disponibles en inglés.";
-    } else if (message === "3") {
-        responseText = "📞 Un representante se comunicará contigo en breve.";
-        // Aquí podríamos agregar una función para avisar a un humano
+        // Verificar si hay un mensaje recibido
+        if (!req.body || !req.body.Body) {
+            console.error("Error: No se recibió un mensaje válido.");
+            return res.status(400).send("No se recibió un mensaje válido.");
+        }
+
+        const message = req.body.Body.toLowerCase(); // Convertir el mensaje a minúsculas
+        console.log("Mensaje recibido:", message);
+
+        let respuesta;
+
+        if (message.includes("hola")) {
+            respuesta = "¡Hola! Soy un bot automático. ¿En qué puedo ayudarte?";
+        } else if (message.includes("libros")) {
+            respuesta = "Tenemos libros en español e inglés. ¿Cuál te interesa?";
+        } else if (message.includes("español")) {
+            respuesta = "Aquí tienes nuestra lista de libros en español...";
+        } else if (message.includes("inglés")) {
+            respuesta = "Aquí tienes nuestra lista de libros en inglés...";
+        } else {
+            respuesta = "No entendí tu mensaje. ¿Puedes reformularlo?";
+        }
+
+        twiml.message(respuesta);
+        res.writeHead(200, { "Content-Type": "text/xml" });
+        res.end(twiml.toString());
+
+    } catch (error) {
+        console.error("Error en el webhook:", error);
+        res.status(500).send("Error interno del servidor.");
     }
-
-    // 📌 Enviar respuesta a WhatsApp
-    const twiml = new twilio.twiml.MessagingResponse();
-    twiml.message(responseText);
-    
-    res.type('text/xml').send(twiml.toString());
 });
 
-// 📌 Iniciar servidor
-app.listen(PORT, () => {
-    console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
+// Iniciar el servidor
+app.listen(port, () => {
+    console.log(`🚀 Servidor ejecutándose en el puerto ${port}`);
 });
