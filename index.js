@@ -6,6 +6,7 @@ const { google } = require('googleapis');
 const app = express();
 const PORT = process.env.PORT || 10000;
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // 📌 Configuración de Google Sheets
 const sheets = google.sheets('v4');
@@ -46,8 +47,17 @@ app.get('/', (req, res) => {
 
 // 📌 Webhook de Twilio
 app.post('/webhook', async (req, res) => {
+    console.log("Datos recibidos:", req.body); // 👈 Log para depuración
+
     const { Body, From } = req.body;
+    
+    if (!Body) {
+        console.log("⚠️ No se recibió ningún mensaje en req.body.Body");
+        return res.send("OK");
+    }
+
     const message = Body.toLowerCase().trim();
+    console.log("Mensaje recibido:", message);
 
     let responseText = "¡Hola! ¿Qué necesitas?\n";
     responseText += "1️⃣ Libros de colegio 📚\n";
