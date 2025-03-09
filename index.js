@@ -1,58 +1,96 @@
-require("dotenv").config();
-const express = require("express");
-const bodyParser = require("body-parser");
-const twilio = require("twilio");
+const express = require('express');
+const twilio = require('twilio');
+const { google } = require('googleapis');
 
+// 📌 Configuración del servidor
 const app = express();
-const port = process.env.PORT || 10000; // Render usa el puerto 10000 por defecto
+const PORT = process.env.PORT || 10000;
+app.use(express.json());
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// 📌 Configuración de Google Sheets
+const sheets = google.sheets('v4');
+const auth = new google.auth.GoogleAuth({
+    credentials: JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+});
+const spreadsheetId = "1JbBKXOLL_ByTEcxdGfA9ulLC47TGRjDq_-oFiH-GQPE"; // 📌 ID de tu Google Sheets
 
-// Ruta principal para verificar que el servidor está activo
-app.get("/", (req, res) => {
+// 📌 Función para obtener libros desde Google Sheets
+async function getBooks() {
+    const client = await auth.getClient();
+    const response = await sheets.spreadsheets.values.get({
+        auth: client,
+        spreadsheetId,
+        range: 'A:F' // 📌 Ajusta según la cantidad de columnas que tengas
+    });
+
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) {
+        return [];
+    }
+
+    return rows.slice(1).map(row => ({
+        id: row[0],
+        title: row[1],
+        language: row[2],
+        editorial: row[3],
+        subject: row[4],
+        link: row[5]
+    }));
+}
+
+// 📌 Ruta para verificar que el bot está activo
+app.get('/', (req, res) => {
     res.send("El bot está activo");
 });
 
-// Ruta del webhook para recibir mensajes de WhatsApp
-app.post("/webhook", (req, res) => {
-    try {
-        const twiml = new twilio.twiml.MessagingResponse();
+// 📌 Webhook de Twilio
+app.post('/webhook', async (req, res) => {
+    const { Body, From } = req.body;
+    const message = Body.toLowerCase().trim();
 
-        // Verificar si hay un mensaje recibido
-        if (!req.body || !req.body.Body) {
-            console.error("Error: No se recibió un mensaje válido.");
-            return res.status(400).send("No se recibió un mensaje válido.");
-        }
+    let responseText = "¡Hola! ¿Qué necesitas?\n";
+    responseText += "1️⃣ Libros de colegio 📚\n";
+    responseText += "2️⃣ Impresiones 🖨️\n";
+    responseText += "3️⃣ Otra consulta ❓";
 
-        const message = req.body.Body.toLowerCase(); // Convertir el mensaje a minúsculas
-        console.log("Mensaje recibido:", message);
+    // 📌 Paso 1: Elegir categoría
+    if (message === "1") {
+        responseText = "📌 ¿Qué idioma necesitas?\n1️⃣ Español\n2️⃣ Inglés";
+    } else if (message === "2") {
+        responseText = "🖨️ Para impresiones, comunícate con un representante.";
+    } else if (message === "3") {
+        responseText = "❓ Por favor, describe tu consulta.";
+    } else if (message === "español" || message === "inglés") {
+        responseText = "🏢 ¿De qué editorial es el libro?\n1️⃣ Santillana\n2️⃣ Kapelusz\n3️⃣ Oxford";
+    } else if (["santillana", "kapelusz", "oxford"].includes(message)) {
+        responseText = "📘 ¿Qué materia necesitas?\n1️⃣ Matemática\n2️⃣ Lengua\n3️⃣ Ciencias";
+    } else if (["matemática", "lengua", "ciencias"].includes(message)) {
+        const books = await getBooks();
+        const filteredBooks = books.filter(book => 
+            book.subject.toLowerCase() === message
+        );
 
-        let respuesta;
-
-        if (message.includes("hola")) {
-            respuesta = "¡Hola! Soy un bot automático. ¿En qué puedo ayudarte?";
-        } else if (message.includes("libros")) {
-            respuesta = "Tenemos libros en español e inglés. ¿Cuál te interesa?";
-        } else if (message.includes("español")) {
-            respuesta = "Aquí tienes nuestra lista de libros en español...";
-        } else if (message.includes("inglés")) {
-            respuesta = "Aquí tienes nuestra lista de libros en inglés...";
+        if (filteredBooks.length === 0) {
+            responseText = "❌ No encontramos ese libro. Un representante te ayudará.";
         } else {
-            respuesta = "No entendí tu mensaje. ¿Puedes reformularlo?";
+            responseText = "📚 Aquí están los libros disponibles:\n\n";
+            filteredBooks.forEach(book => {
+                responseText += `📖 ${book.title} - ${book.editorial}\n🔗 ${book.link}\n\n`;
+            });
         }
-
-        twiml.message(respuesta);
-        res.writeHead(200, { "Content-Type": "text/xml" });
-        res.end(twiml.toString());
-
-    } catch (error) {
-        console.error("Error en el webhook:", error);
-        res.status(500).send("Error interno del servidor.");
+    } else {
+        responseText = "⚠️ Opción no válida. Por favor, selecciona un número del menú.";
     }
+
+    // 📌 Enviar respuesta a WhatsApp
+    const twiml = new twilio.twiml.MessagingResponse();
+    twiml.message(responseText);
+    
+    res.type('text/xml').send(twiml.toString());
 });
 
-// Iniciar el servidor
-app.listen(port, () => {
-    console.log(`🚀 Servidor ejecutándose en el puerto ${port}`);
+// 📌 Iniciar servidor
+app.listen(PORT, () => {
+    console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
 });
