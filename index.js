@@ -11,37 +11,40 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// 📌 DEBUG: Ver contenido de GOOGLE_SERVICE_ACCOUNT antes de parsear
-console.log("📌 Contenido de GOOGLE_SERVICE_ACCOUNT:", process.env.GOOGLE_SERVICE_ACCOUNT);
+// 📌 Configuración de Google Sheets
+const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
+const auth = new JWT({
+    email: serviceAccount.client_email,
+    key: serviceAccount.private_key.replace(/\\n/g, '\n'),
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+});
 
-try {
-    if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
-        throw new Error("GOOGLE_SERVICE_ACCOUNT está vacío o no está definido.");
-    }
-
-    const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
-    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
-    const auth = new JWT({
-        email: serviceAccount.client_email,
-        key: serviceAccount.private_key.replace(/\\n/g, '\n'),
-        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-
-    async function loadSheet() {
-        await doc.useServiceAccountAuth(auth);
-        await doc.loadInfo();
-        return doc.sheetsByIndex[0];
-    }
-} catch (error) {
-    console.error("❌ Error al procesar GOOGLE_SERVICE_ACCOUNT:", error.message);
-}
-
+// 📌 Estados de los usuarios para controlar el flujo de conversación
 const userState = {};
 
-// Webhook para recibir mensajes de WhatsApp
+// 📌 Función para enviar mensajes por WhatsApp
+async function sendMessage(to, body) {
+    try {
+        await axios.post('https://api.twilio.com/2010-04-01/Accounts/' + process.env.TWILIO_SID + '/Messages.json', new URLSearchParams({
+            From: process.env.TWILIO_WHATSAPP_NUMBER,
+            To: to,
+            Body: body
+        }), {
+            auth: {
+                username: process.env.TWILIO_SID,
+                password: process.env.TWILIO_AUTH_TOKEN
+            }
+        });
+    } catch (error) {
+        console.error("❌ Error enviando mensaje de WhatsApp:", error);
+    }
+}
+
+// 📌 Webhook para recibir mensajes
 app.post('/webhook', async (req, res) => {
     try {
-        const message = req.body.Body ? req.body.Body.toLowerCase().trim() : "";
+        const message = req.body.Body ? req.body.Body.trim() : "";
         const from = req.body.From;
 
         if (!message) {
@@ -50,11 +53,12 @@ app.post('/webhook', async (req, res) => {
 
         console.log(`📩 Mensaje recibido: ${message} de ${from}`);
 
-        let responseMessage = "No entendí tu mensaje. Por favor, usa una opción válida.";
-
+        // Si el usuario no tiene estado, lo iniciamos
         if (!userState[from]) {
             userState[from] = { step: "inicio" };
         }
+
+        let responseMessage = "No entendí tu mensaje. Por favor, usa una opción válida.";
 
         switch (userState[from].step) {
             case "inicio":
@@ -101,23 +105,26 @@ app.post('/webhook', async (req, res) => {
                 }
                 break;
 
+            case "editorial_libros":
+                if (message === "1") {
+                    userState[from].editorial = userState[from].idioma === "Español" ? "Santillana" : "Pearson";
+                } else if (message === "2") {
+                    userState[from].editorial = userState[from].idioma === "Español" ? "Capeluz" : "Cambridge";
+                } else {
+                    responseMessage = "Por favor, elige una opción válida (1 o 2).";
+                    break;
+                }
+
+                responseMessage = `📘 ¿Qué materia necesitas de ${userState[from].editorial}?\n1️⃣ Matemática\n2️⃣ Lengua\n3️⃣ Ciencias Sociales\n4️⃣ Ciencias Naturales`;
+                userState[from].step = "materia_libros";
+                break;
+
             default:
                 responseMessage = "No entendí tu mensaje. Usa una opción válida.";
                 userState[from].step = "inicio";
         }
 
-        // Enviar respuesta
-        await axios.post('https://api.twilio.com/2010-04-01/Accounts/' + process.env.TWILIO_SID + '/Messages.json', new URLSearchParams({
-            From: process.env.TWILIO_WHATSAPP_NUMBER,
-            To: from,
-            Body: responseMessage
-        }), {
-            auth: {
-                username: process.env.TWILIO_SID,
-                password: process.env.TWILIO_AUTH_TOKEN
-            }
-        });
-
+        await sendMessage(from, responseMessage);
         res.sendStatus(200);
     } catch (error) {
         console.error("❌ Error en el webhook:", error);
@@ -125,12 +132,12 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-// Endpoint para verificar si el bot está activo
+// 📌 Endpoint para verificar si el bot está activo
 app.get('/', (req, res) => {
     res.send("🚀 El bot está activo y funcionando.");
 });
 
-// Iniciar servidor
+// 📌 Iniciar servidor
 app.listen(PORT, () => {
     console.log(`🚀 Servidor ejecutándose en el puerto ${PORT}`);
 });
