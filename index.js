@@ -12,20 +12,31 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Configurar credenciales de Google Sheets
-const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
-const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
-const auth = new JWT({
-    email: serviceAccount.client_email,
-    key: serviceAccount.private_key,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-});
+// 📌 DEBUG: Mostrar contenido de GOOGLE_SERVICE_ACCOUNT antes de parsear
+console.log("📌 Contenido de GOOGLE_SERVICE_ACCOUNT:", process.env.GOOGLE_SERVICE_ACCOUNT);
 
-// Función para cargar los datos de la hoja de cálculo
-async function loadSheet() {
-    await doc.useServiceAccountAuth(auth);
-    await doc.loadInfo();
-    return doc.sheetsByIndex[0]; // Usar la primera hoja
+// Configurar credenciales de Google Sheets
+try {
+    if (!process.env.GOOGLE_SERVICE_ACCOUNT) {
+        throw new Error("GOOGLE_SERVICE_ACCOUNT está vacío o no está definido.");
+    }
+
+    const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+    const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID);
+    const auth = new JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key.replace(/\\n/g, '\n'), // 🔹 Reemplaza `\n` en la clave privada
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    // Función para cargar los datos de la hoja de cálculo
+    async function loadSheet() {
+        await doc.useServiceAccountAuth(auth);
+        await doc.loadInfo();
+        return doc.sheetsByIndex[0]; // Usar la primera hoja
+    }
+} catch (error) {
+    console.error("❌ Error al procesar GOOGLE_SERVICE_ACCOUNT:", error.message);
 }
 
 // Webhook para recibir mensajes de WhatsApp
